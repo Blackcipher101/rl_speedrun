@@ -17,6 +17,8 @@ Rewards:
 """
 
 import numpy as np
+import matplotlib.pyplot as plt
+from pathlib import Path
 
 try:
     import gymnasium as gym
@@ -236,6 +238,98 @@ def print_grid_for_state(env, s: int) -> None:
     env_render.close()
 
 
+def visualize_taxi_values(V: np.ndarray, save_path: str = None) -> None:
+    """
+    Create a heatmap visualization of Taxi-v3 value function.
+
+    Since Taxi has 500 states (5x5 grid × 5 passenger locs × 4 destinations),
+    we visualize the average value for each taxi position, aggregated across
+    all passenger locations and destinations.
+
+    Parameters
+    ----------
+    V : np.ndarray
+        Value function (500 values).
+    save_path : str, optional
+        Path to save the figure.
+    """
+    fig, axes = plt.subplots(1, 3, figsize=(16, 5))
+
+    grid_size = 5
+
+    # ===== Plot 1: Average value by taxi position =====
+    ax1 = axes[0]
+    avg_by_pos = np.zeros((grid_size, grid_size))
+    count_by_pos = np.zeros((grid_size, grid_size))
+
+    for s in range(500):
+        taxi_row, taxi_col, _, _ = decode_state(s)
+        avg_by_pos[taxi_row, taxi_col] += V[s]
+        count_by_pos[taxi_row, taxi_col] += 1
+
+    avg_by_pos /= count_by_pos
+
+    im1 = ax1.imshow(avg_by_pos, cmap='viridis', aspect='equal')
+    plt.colorbar(im1, ax=ax1, label='Avg V*(s)')
+
+    for i in range(grid_size):
+        for j in range(grid_size):
+            ax1.text(j, i, f'{avg_by_pos[i, j]:.0f}', ha='center', va='center',
+                    fontsize=10, color='white', fontweight='bold')
+
+    # Mark locations
+    locations = [(0, 0, 'R'), (0, 4, 'G'), (4, 0, 'Y'), (4, 3, 'B')]
+    for row, col, name in locations:
+        ax1.plot(col, row, 'ro', markersize=15, markeredgecolor='white', markeredgewidth=2)
+        ax1.text(col, row, name, ha='center', va='center', fontsize=8,
+                color='white', fontweight='bold')
+
+    ax1.set_title('Average V* by Taxi Position\n(across all passenger/dest combos)', fontsize=11, fontweight='bold')
+    ax1.set_xlabel('Column')
+    ax1.set_ylabel('Row')
+    ax1.set_xticks(range(grid_size))
+    ax1.set_yticks(range(grid_size))
+
+    # ===== Plot 2: Value by passenger location =====
+    ax2 = axes[1]
+    passenger_locs = ['R', 'G', 'Y', 'B', 'In Taxi']
+    avg_by_passenger = []
+
+    for p in range(5):
+        values = [V[s] for s in range(500) if decode_state(s)[2] == p]
+        avg_by_passenger.append(np.mean(values))
+
+    colors = ['#e74c3c', '#2ecc71', '#f1c40f', '#3498db', '#9b59b6']
+    bars = ax2.bar(passenger_locs, avg_by_passenger, color=colors, edgecolor='black')
+    ax2.set_ylabel('Average V*(s)', fontsize=11)
+    ax2.set_title('Average V* by Passenger Location', fontsize=11, fontweight='bold')
+    ax2.set_ylim(min(avg_by_passenger) - 10, max(avg_by_passenger) + 10)
+
+    for bar, val in zip(bars, avg_by_passenger):
+        ax2.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 2,
+                f'{val:.0f}', ha='center', va='bottom', fontsize=10, fontweight='bold')
+
+    # ===== Plot 3: Value distribution histogram =====
+    ax3 = axes[2]
+    ax3.hist(V, bins=30, color='steelblue', edgecolor='black', alpha=0.7)
+    ax3.axvline(V.mean(), color='red', linestyle='--', linewidth=2, label=f'Mean: {V.mean():.0f}')
+    ax3.axvline(V.min(), color='orange', linestyle=':', linewidth=2, label=f'Min: {V.min():.0f}')
+    ax3.axvline(V.max(), color='green', linestyle=':', linewidth=2, label=f'Max: {V.max():.0f}')
+    ax3.set_xlabel('V*(s)', fontsize=11)
+    ax3.set_ylabel('Count', fontsize=11)
+    ax3.set_title('Distribution of V* across 500 states', fontsize=11, fontweight='bold')
+    ax3.legend(fontsize=9)
+
+    plt.suptitle('Taxi-v3 Value Function Analysis', fontsize=14, fontweight='bold', y=1.02)
+    plt.tight_layout()
+
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches='tight', facecolor='white')
+        print(f"\nVisualization saved to: {save_path}")
+
+    plt.close()
+
+
 # ============================================================================
 # Evaluation
 # ============================================================================
@@ -413,6 +507,10 @@ def solve_taxi(gamma: float = 0.99, theta: float = 1e-8) -> None:
               f"min = {values.min():6.2f}, max = {values.max():6.2f}")
 
     env.close()
+
+    # Generate and save visualization
+    save_path = Path(__file__).parent / "taxi_value_heatmap.png"
+    visualize_taxi_values(V, str(save_path))
 
     print("\n" + "=" * 60)
     print("Solution Complete")

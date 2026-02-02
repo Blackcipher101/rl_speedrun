@@ -17,6 +17,9 @@ Key features:
 """
 
 import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
+from pathlib import Path
 
 try:
     import gymnasium as gym
@@ -284,6 +287,151 @@ def print_environment_map(grid_size: int = 4) -> None:
     print("S=Start, F=Frozen, H=Hole, G=Goal")
 
 
+def visualize_frozenlake_solution(V: np.ndarray, policy: np.ndarray,
+                                   grid_size: int = 4, save_path: str = None) -> None:
+    """
+    Create a visualization of FrozenLake solution.
+
+    Parameters
+    ----------
+    V : np.ndarray
+        Value function.
+    policy : np.ndarray
+        Policy (action indices).
+    grid_size : int
+        Size of the grid.
+    save_path : str, optional
+        Path to save the figure.
+    """
+    # FrozenLake map
+    cell_types = ['S', 'F', 'F', 'F',
+                  'F', 'H', 'F', 'H',
+                  'F', 'F', 'F', 'H',
+                  'H', 'F', 'F', 'G']
+
+    holes = {5, 7, 11, 12}
+    goal = {15}
+    start = {0}
+
+    fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+
+    V_grid = V.reshape(grid_size, grid_size)
+
+    # ===== Left plot: Value Function =====
+    ax1 = axes[0]
+
+    # Create custom colormap data
+    cmap_data = np.zeros((grid_size, grid_size, 4))
+    for i in range(grid_size):
+        for j in range(grid_size):
+            s = i * grid_size + j
+            if s in holes:
+                cmap_data[i, j] = [0.2, 0.2, 0.2, 1.0]  # Dark gray for holes
+            elif s in goal:
+                cmap_data[i, j] = [0.2, 0.8, 0.2, 1.0]  # Green for goal
+            else:
+                # Blue gradient based on value
+                intensity = V[s] / max(V.max(), 0.01)
+                cmap_data[i, j] = [0.1, 0.3 + 0.5 * intensity, 0.9, 1.0]
+
+    ax1.imshow(cmap_data, aspect='equal')
+
+    # Add value and cell type annotations
+    for i in range(grid_size):
+        for j in range(grid_size):
+            s = i * grid_size + j
+            if s in holes:
+                ax1.text(j, i, f'H\n0.00', ha='center', va='center',
+                        fontsize=11, color='white', fontweight='bold')
+            elif s in goal:
+                ax1.text(j, i, f'G\n{V[s]:.2f}', ha='center', va='center',
+                        fontsize=11, color='white', fontweight='bold')
+            elif s in start:
+                ax1.text(j, i, f'S\n{V[s]:.2f}', ha='center', va='center',
+                        fontsize=11, color='white', fontweight='bold')
+            else:
+                ax1.text(j, i, f'{V[s]:.2f}', ha='center', va='center',
+                        fontsize=11, color='white')
+
+    ax1.set_xticks(range(grid_size))
+    ax1.set_yticks(range(grid_size))
+    ax1.set_title('Value Function V*(s)\n(≈ Prob. of reaching goal)', fontsize=13, fontweight='bold')
+    ax1.set_xlabel('Column')
+    ax1.set_ylabel('Row')
+
+    for i in range(grid_size + 1):
+        ax1.axhline(i - 0.5, color='white', linewidth=2)
+        ax1.axvline(i - 0.5, color='white', linewidth=2)
+
+    # ===== Right plot: Policy =====
+    ax2 = axes[1]
+
+    # Background colors
+    bg_colors = np.zeros((grid_size, grid_size, 4))
+    for i in range(grid_size):
+        for j in range(grid_size):
+            s = i * grid_size + j
+            if s in holes:
+                bg_colors[i, j] = [0.2, 0.2, 0.2, 1.0]
+            elif s in goal:
+                bg_colors[i, j] = [0.2, 0.8, 0.2, 1.0]
+            elif s in start:
+                bg_colors[i, j] = [0.9, 0.9, 0.2, 1.0]
+            else:
+                bg_colors[i, j] = [0.7, 0.85, 1.0, 1.0]
+
+    ax2.imshow(bg_colors, aspect='equal')
+
+    # Actions: LEFT=0, DOWN=1, RIGHT=2, UP=3
+    arrow_dx = [-0.3, 0, 0.3, 0]
+    arrow_dy = [0, 0.3, 0, -0.3]
+    arrow_symbols = ['←', '↓', '→', '↑']
+
+    for i in range(grid_size):
+        for j in range(grid_size):
+            s = i * grid_size + j
+            if s in holes:
+                ax2.text(j, i, '☠', ha='center', va='center', fontsize=20)
+            elif s in goal:
+                ax2.text(j, i, '🎯', ha='center', va='center', fontsize=20)
+            else:
+                action = policy[s]
+                ax2.annotate('', xy=(j + arrow_dx[action], i + arrow_dy[action]),
+                            xytext=(j, i),
+                            arrowprops=dict(arrowstyle='->', color='darkblue',
+                                          lw=2.5, mutation_scale=20))
+
+    ax2.set_xticks(range(grid_size))
+    ax2.set_yticks(range(grid_size))
+    ax2.set_title('Optimal Policy π*(s)\n(Slippery: 1/3 chance each direction)', fontsize=13, fontweight='bold')
+    ax2.set_xlabel('Column')
+    ax2.set_ylabel('Row')
+    ax2.set_xlim(-0.5, grid_size - 0.5)
+    ax2.set_ylim(grid_size - 0.5, -0.5)
+
+    for i in range(grid_size + 1):
+        ax2.axhline(i - 0.5, color='black', linewidth=2)
+        ax2.axvline(i - 0.5, color='black', linewidth=2)
+
+    # Legend
+    patches = [
+        mpatches.Patch(color=[0.9, 0.9, 0.2], label='Start'),
+        mpatches.Patch(color=[0.7, 0.85, 1.0], label='Frozen'),
+        mpatches.Patch(color=[0.2, 0.2, 0.2], label='Hole'),
+        mpatches.Patch(color=[0.2, 0.8, 0.2], label='Goal'),
+    ]
+    ax2.legend(handles=patches, loc='upper left', fontsize=9)
+
+    plt.suptitle('FrozenLake-v1 Solution (4x4, Slippery)', fontsize=15, fontweight='bold', y=1.02)
+    plt.tight_layout()
+
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches='tight', facecolor='white')
+        print(f"\nVisualization saved to: {save_path}")
+
+    plt.close()
+
+
 # ============================================================================
 # Evaluation
 # ============================================================================
@@ -435,6 +583,10 @@ def solve_frozenlake(gamma: float = 0.99, theta: float = 1e-8) -> None:
         print(f"  Improvement: {(success_rate - random_success)/random_success*100:.1f}%")
 
         env.close()
+
+    # Generate and save visualization
+    save_path = Path(__file__).parent / "frozenlake_solution.png"
+    visualize_frozenlake_solution(V, policy, save_path=str(save_path))
 
     print("\n" + "=" * 60)
     print("Solution Complete")

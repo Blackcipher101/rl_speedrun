@@ -22,6 +22,9 @@ Transitions: Deterministic
 """
 
 import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
+from pathlib import Path
 
 
 # ============================================================================
@@ -353,6 +356,122 @@ def print_policy_detailed(policy: np.ndarray, grid_size: int = 4,
                 print(f"  State {s:2d} ({row},{col}): {action_names[policy[s]]}")
 
 
+def visualize_solution(V: np.ndarray, policy: np.ndarray, grid_size: int = 4,
+                       terminal_states: set = None, save_path: str = None) -> None:
+    """
+    Create a visualization of the value function and policy.
+
+    Parameters
+    ----------
+    V : np.ndarray
+        Value function.
+    policy : np.ndarray
+        Policy (action indices).
+    grid_size : int
+        Size of the grid.
+    terminal_states : set
+        Set of terminal state indices.
+    save_path : str, optional
+        Path to save the figure.
+    """
+    if terminal_states is None:
+        terminal_states = {0, grid_size * grid_size - 1}
+
+    fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+
+    # Reshape value function to grid
+    V_grid = V.reshape(grid_size, grid_size)
+
+    # ===== Left plot: Value Function Heatmap =====
+    ax1 = axes[0]
+    im = ax1.imshow(V_grid, cmap='RdYlGn', aspect='equal')
+
+    # Add value annotations
+    for i in range(grid_size):
+        for j in range(grid_size):
+            s = i * grid_size + j
+            color = 'white' if abs(V_grid[i, j]) > 1.5 else 'black'
+            if s in terminal_states:
+                ax1.text(j, i, f'G\n{V_grid[i, j]:.1f}', ha='center', va='center',
+                        fontsize=12, fontweight='bold', color=color)
+            else:
+                ax1.text(j, i, f'{V_grid[i, j]:.1f}', ha='center', va='center',
+                        fontsize=12, color=color)
+
+    ax1.set_xticks(range(grid_size))
+    ax1.set_yticks(range(grid_size))
+    ax1.set_xticklabels(range(grid_size))
+    ax1.set_yticklabels(range(grid_size))
+    ax1.set_xlabel('Column', fontsize=12)
+    ax1.set_ylabel('Row', fontsize=12)
+    ax1.set_title('Value Function V*(s)', fontsize=14, fontweight='bold')
+    plt.colorbar(im, ax=ax1, label='V*(s)')
+
+    # Add grid lines
+    for i in range(grid_size + 1):
+        ax1.axhline(i - 0.5, color='black', linewidth=1)
+        ax1.axvline(i - 0.5, color='black', linewidth=1)
+
+    # ===== Right plot: Policy with arrows =====
+    ax2 = axes[1]
+
+    # Create a grid showing terminal states
+    policy_grid = np.zeros((grid_size, grid_size))
+    for s in terminal_states:
+        i, j = divmod(s, grid_size)
+        policy_grid[i, j] = 1
+
+    ax2.imshow(policy_grid, cmap='Greens', alpha=0.3, aspect='equal')
+
+    # Arrow directions: UP, DOWN, LEFT, RIGHT
+    arrow_dx = [0, 0, -0.3, 0.3]
+    arrow_dy = [-0.3, 0.3, 0, 0]
+    arrow_symbols = ['↑', '↓', '←', '→']
+
+    for i in range(grid_size):
+        for j in range(grid_size):
+            s = i * grid_size + j
+            if s in terminal_states:
+                ax2.text(j, i, '★', ha='center', va='center', fontsize=24,
+                        color='green', fontweight='bold')
+            else:
+                action = policy[s]
+                ax2.annotate('', xy=(j + arrow_dx[action], i + arrow_dy[action]),
+                            xytext=(j, i),
+                            arrowprops=dict(arrowstyle='->', color='darkblue',
+                                          lw=2, mutation_scale=20))
+                ax2.text(j, i + 0.35, arrow_symbols[action], ha='center', va='center',
+                        fontsize=10, color='darkblue')
+
+    ax2.set_xticks(range(grid_size))
+    ax2.set_yticks(range(grid_size))
+    ax2.set_xticklabels(range(grid_size))
+    ax2.set_yticklabels(range(grid_size))
+    ax2.set_xlabel('Column', fontsize=12)
+    ax2.set_ylabel('Row', fontsize=12)
+    ax2.set_title('Optimal Policy π*(s)', fontsize=14, fontweight='bold')
+    ax2.set_xlim(-0.5, grid_size - 0.5)
+    ax2.set_ylim(grid_size - 0.5, -0.5)
+
+    # Add grid lines
+    for i in range(grid_size + 1):
+        ax2.axhline(i - 0.5, color='black', linewidth=1)
+        ax2.axvline(i - 0.5, color='black', linewidth=1)
+
+    # Legend
+    star_patch = mpatches.Patch(color='green', alpha=0.5, label='Terminal (Goal)')
+    ax2.legend(handles=[star_patch], loc='upper right')
+
+    plt.suptitle('GridWorld Solution (4x4, Deterministic)', fontsize=16, fontweight='bold', y=1.02)
+    plt.tight_layout()
+
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches='tight', facecolor='white')
+        print(f"\nVisualization saved to: {save_path}")
+
+    plt.close()
+
+
 # ============================================================================
 # Main Solver
 # ============================================================================
@@ -442,6 +561,10 @@ def solve_gridworld(gamma: float = 1.0, theta: float = 1e-8) -> None:
     max_diff = np.max(np.abs(V_vi - expected_V))
     print(f"\nMax difference from expected: {max_diff:.6f}")
     print(f"(Small difference due to γ={effective_gamma} vs γ=1.0)")
+
+    # Generate and save visualization
+    save_path = Path(__file__).parent / "gridworld_solution.png"
+    visualize_solution(V_vi, policy_vi, env.grid_size, env.terminal_states, str(save_path))
 
 
 if __name__ == "__main__":

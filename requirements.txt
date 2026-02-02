@@ -1,0 +1,9 @@
+# RL Fundamentals Repository Dependencies
+# ========================================
+
+# Core numerical computing
+numpy>=1.21.0
+
+# Gymnasium for standard RL environments
+# Required for FrozenLake and Taxi-v3 solvers
+gymnasium>=0.29.0

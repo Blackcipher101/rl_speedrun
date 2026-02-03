@@ -346,6 +346,62 @@ V*(s) ←--[max_a]-- Q*(s,a) ←--[P,R,γ]-- V*(s')
                                        Q*(s',a')
 ```
 
+### Visual Intuition (ASCII)
+
+```
+Bellman Expectation (fixed policy π)
+
+   State s
+     |
+     | choose action a ~ π(a|s)
+     v
+   Action a
+     |\
+     | \ immediate reward R(s,a,s')
+     |  \
+     |   v
+     |  [reward]
+     |
+     | P(s'|s,a)
+     v
+   Next state s'
+     |
+     | value V^π(s')
+     v
+   [future value]
+        \
+         \  (reward + γ * future value)
+          \
+           v
+          V^π(s)
+
+Bellman Optimality (best action)
+
+   State s
+     |
+     | choose best action a*
+     v
+   Action a*
+     |\
+     | \ immediate reward R(s,a,s')
+     |  \
+     |   v
+     |  [reward]
+     |
+     | P(s'|s,a)
+     v
+   Next state s'
+     |
+     | best future value max_a' Q*(s',a')
+     v
+   [best future value]
+        \
+         \  (reward + γ * best future value)
+          \
+           v
+          V*(s)
+```
+
 ---
 
 ## 8. Computational Implications

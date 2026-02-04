@@ -11,7 +11,7 @@ A personal RL learning repo where I implement algorithms from first principles. 
 ## Repository Structure
 
 ```
-📁 rl_fundamentals/          <- The "I actually understand math" section
+📁 rl_fundamentals/
 ├── 01_mdp/                  <- MDPs: fancy way to say "states go brrr"
 ├── 02_value_functions/      <- V(s) and Q(s,a) - the OG value bros
 ├── 03_bellman_equations/    <- Bellman said: "it's recursive, deal with it"
@@ -21,11 +21,18 @@ A personal RL learning repo where I implement algorithms from first principles. 
 │   ├── frozenlake/          <- Slippery boi simulator
 │   └── taxi_v3/             <- Uber but worse
 ├── 06_temporal_difference/  <- Learning from experience, one step at a time
-│   ├── q_learning.py        <- Off-policy: "I'll learn the optimal path even while exploring"
-│   └── sarsa.py             <- On-policy: "I'll learn about what I actually do"
-└── 07_td_applications/      <- TD algorithms in the wild
-    ├── cliffwalking/        <- Q-Learning vs SARSA showdown
-    └── cartpole/            <- Continuous states? Just discretize it bro
+│   ├── q_learning.py        <- Off-policy TD control
+│   └── sarsa.py             <- On-policy TD control
+├── 07_td_applications/      <- TD algorithms in the wild
+│   ├── cliffwalking/        <- Q-Learning vs SARSA showdown
+│   └── cartpole/            <- Discretized Q-Learning
+├── 08_monte_carlo/          <- Wait for the episode to end, then learn
+│   └── monte_carlo.py       <- First-Visit & Every-Visit MC
+├── 09_policy_gradients/     <- Directly optimize the policy
+│   └── reinforce.py         <- The OG policy gradient
+└── 10_mc_pg_applications/   <- MC & PG in action
+    ├── blackjack/           <- Classic MC territory
+    └── cartpole_reinforce/  <- Neural network policy
 ```
 
 ---
@@ -82,6 +89,33 @@ The classic demonstration of off-policy vs on-policy learning:
 
 ---
 
+## Week 3: Monte Carlo & Policy Gradients
+
+*"Episode-based learning meets direct policy optimization"*
+
+### Blackjack - Monte Carlo Territory
+<p align="center">
+  <img src="rl_fundamentals/10_mc_pg_applications/blackjack/blackjack_solution.png" width="700"/>
+</p>
+
+*Learning to play 21 by sampling complete games. The house still wins, but less often.*
+
+Monte Carlo methods wait for the episode to end, then learn from actual returns:
+- **First-Visit MC**: Only count the first visit to each state
+- **Every-Visit MC**: Count all visits (lower variance)
+
+### CartPole REINFORCE - Neural Network Policy
+<p align="center">
+  <img src="rl_fundamentals/10_mc_pg_applications/cartpole_reinforce/cartpole_reinforce.png" width="700"/>
+</p>
+
+*Direct policy optimization: no value function needed, just gradients and vibes.*
+
+REINFORCE directly optimizes the policy using the policy gradient theorem:
+$$\nabla J(\theta) = \mathbb{E}[\nabla \log \pi_\theta(a|s) \cdot G_t]$$
+
+---
+
 ## Quick Start
 
 ```bash
@@ -89,21 +123,17 @@ The classic demonstration of off-policy vs on-policy learning:
 pip install -r rl_fundamentals/requirements.txt
 
 # === Week 1: Dynamic Programming ===
-# Watch GridWorld get solved
 python rl_fundamentals/05_env_applications/gridworld/gridworld_dp.py
-
-# See a drunk agent navigate ice
 python rl_fundamentals/05_env_applications/frozenlake/solve_frozenlake.py
-
-# Experience Taxi dispatcher hell
 python rl_fundamentals/05_env_applications/taxi_v3/solve_taxi.py
 
 # === Week 2: Temporal Difference ===
-# The classic Q-Learning vs SARSA comparison
 python rl_fundamentals/07_td_applications/cliffwalking/solve_cliffwalking.py
-
-# Discretized Q-Learning on CartPole
 python rl_fundamentals/07_td_applications/cartpole/solve_cartpole.py
+
+# === Week 3: Monte Carlo & Policy Gradients ===
+python rl_fundamentals/10_mc_pg_applications/blackjack/solve_blackjack.py
+python rl_fundamentals/10_mc_pg_applications/cartpole_reinforce/solve_cartpole_reinforce.py
 ```
 
 ---
@@ -112,8 +142,8 @@ python rl_fundamentals/07_td_applications/cartpole/solve_cartpole.py
 
 - [x] **Dynamic Programming** - When you have the cheat codes (full model)
 - [x] **Temporal Difference** - Q-Learning & SARSA (model-free vibes)
-- [ ] **Monte Carlo** - When you just yolo sample full episodes
-- [ ] **Policy Gradient** - Going continuous
+- [x] **Monte Carlo** - Sample full episodes, no bootstrapping
+- [x] **Policy Gradients** - REINFORCE (direct policy optimization)
 - [ ] **Actor-Critic** - Why choose when you can have both
 - [ ] **Deep RL** - Neural networks enter the chat
 
@@ -125,17 +155,33 @@ python rl_fundamentals/07_td_applications/cartpole/solve_cartpole.py
 
 | Algorithm | Update Rule | Requires Model? |
 |-----------|-------------|-----------------|
-| **Value Iteration** | V(s) ← max_a Σ P(s'|s,a)[R + γV(s')] | Yes |
+| **Value Iteration** | V(s) ← max_a Σ P(s'\|s,a)[R + γV(s')] | Yes |
 | **Policy Iteration** | Evaluate → Improve → Repeat | Yes |
 
-### Week 2: Temporal Difference (Model-Free)
+### Week 2: Temporal Difference (Model-Free, Bootstrapping)
 
 | Algorithm | Update Rule | Policy Type |
 |-----------|-------------|-------------|
 | **Q-Learning** | Q(S,A) ← Q(S,A) + α[R + γ·max_a Q(S',a) - Q(S,A)] | Off-policy |
 | **SARSA** | Q(S,A) ← Q(S,A) + α[R + γQ(S',A') - Q(S,A)] | On-policy |
 
-The key difference? Q-Learning uses `max` (what's optimal), SARSA uses the actual next action (what we'll really do).
+### Week 3: Monte Carlo & Policy Gradients
+
+| Algorithm | Update Rule | Key Property |
+|-----------|-------------|--------------|
+| **MC Prediction** | V(s) ← V(s) + α[G_t - V(s)] | Unbiased, high variance |
+| **REINFORCE** | θ ← θ + α·G_t·∇log π(a\|s) | Direct policy optimization |
+
+---
+
+## Method Comparison
+
+| Method | Bootstraps? | Model-Free? | Episode End? | Bias | Variance |
+|--------|-------------|-------------|--------------|------|----------|
+| **DP** | Yes | No | N/A | Low | Low |
+| **TD** | Yes | Yes | No | Some | Medium |
+| **MC** | No | Yes | Yes | None | High |
+| **PG** | No | Yes | Yes | None | Very High |
 
 ---
 
@@ -159,8 +205,8 @@ This repo follows the ancient wisdom:
 
 ---
 
-*Currently speedrunning: Temporal Difference Learning* ✓
+*Currently speedrunning: Monte Carlo & Policy Gradients* ✓
 
-*Next up: Policy Gradients (going continuous)*
+*Next up: Actor-Critic Methods (best of both worlds)*
 
 **Stars appreciated, issues tolerated, PRs celebrated** ⭐

@@ -97,14 +97,14 @@ class DQNetwork:
         self.t = 0  # Time step for bias correction
 
     def _init_weights(self) -> None:
-        """Initialize weights using He initialization."""
+        """Initialize weights using scaled He initialization for stability."""
         dims = [self.state_dim] + self.hidden_dims + [self.action_dim]
 
         for i in range(len(dims) - 1):
             fan_in = dims[i]
 
-            # He initialization for ReLU
-            scale = np.sqrt(2.0 / fan_in)
+            # Smaller initialization for stability (0.1x He init)
+            scale = np.sqrt(2.0 / fan_in) * 0.1
 
             self.params[f'W{i}'] = self.rng.standard_normal((dims[i], dims[i+1])) * scale
             self.params[f'b{i}'] = np.zeros(dims[i+1])
@@ -133,6 +133,8 @@ class DQNetwork:
             b = self.params[f'b{i}']
 
             z = x @ W + b
+            # Clip to prevent overflow
+            z = np.clip(z, -50, 50)
             cache[f'z{i}'] = z
 
             if i < n_layers - 1:  # ReLU for hidden layers
@@ -140,6 +142,10 @@ class DQNetwork:
                 cache[f'a{i}'] = x
             else:  # Linear output
                 x = z
+
+        # Handle NaN/Inf
+        if np.any(~np.isfinite(x)):
+            x = np.nan_to_num(x, nan=0.0, posinf=50.0, neginf=-50.0)
 
         if single_input:
             x = x.squeeze(0)
@@ -199,11 +205,21 @@ class DQNetwork:
             gradients[f'W{i}'] = a_prev.T @ dx
             gradients[f'b{i}'] = np.sum(dx, axis=0)
 
+            # Clip gradients
+            gradients[f'W{i}'] = np.clip(gradients[f'W{i}'], -10, 10)
+            gradients[f'b{i}'] = np.clip(gradients[f'b{i}'], -10, 10)
+
             # Gradient w.r.t. previous layer output
             if i > 0:
                 dx = dx @ self.params[f'W{i}'].T
+                dx = np.clip(dx, -10, 10)
                 # ReLU gradient
                 dx = dx * (cache[f'z{i-1}'] > 0)
+
+        # Handle NaN in gradients
+        for key in gradients:
+            if np.any(~np.isfinite(gradients[key])):
+                gradients[key] = np.nan_to_num(gradients[key], nan=0.0, posinf=1.0, neginf=-1.0)
 
         # Update parameters using Adam optimizer
         self._adam_update(gradients)
@@ -493,19 +509,19 @@ if __name__ == "__main__":
     # Create environment
     env = gym.make("CartPole-v1")
 
-    # Configuration
+    # Configuration - tuned for stability
     config = DQNConfig(
         state_dim=4,
         action_dim=2,
         hidden_dims=[64, 64],
-        n_episodes=300,
+        n_episodes=500,
         max_steps=500,
         batch_size=64,
-        learning_rate=0.001,
+        learning_rate=0.0005,  # Lower for stability
         gamma=0.99,
-        buffer_size=10000,
+        buffer_size=50000,
         min_buffer_size=1000,
-        target_update_freq=100,
+        target_update_freq=200,  # Less frequent updates
         epsilon_start=1.0,
         epsilon_end=0.01,
         epsilon_decay=0.995,

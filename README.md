@@ -30,9 +30,30 @@ A personal RL learning repo where I implement algorithms from first principles. 
 │   └── monte_carlo.py       <- First-Visit & Every-Visit MC
 ├── 09_policy_gradients/     <- Directly optimize the policy
 │   └── reinforce.py         <- The OG policy gradient
-└── 10_mc_pg_applications/   <- MC & PG in action
-    ├── blackjack/           <- Classic MC territory
-    └── cartpole_reinforce/  <- Neural network policy
+├── 10_mc_pg_applications/   <- MC & PG in action
+│   ├── blackjack/           <- Classic MC territory
+│   └── cartpole_reinforce/  <- Neural network policy
+├── 11_unified_agent/        <- Modular RL agent framework
+│   ├── exploration_strategies.py  <- ε-greedy, Boltzmann, UCB
+│   └── unified_agent.py     <- Configurable Q-Learning/SARSA
+├── 12_benchmarking/         <- Systematic algorithm comparison
+│   └── benchmark.py         <- Multi-algorithm benchmarking
+├── 13_dqn_fundamentals/     <- Deep Q-Networks from scratch
+│   ├── replay_buffer.py     <- Experience replay
+│   ├── target_network.py    <- Stable learning targets
+│   └── dqn.py               <- Full DQN implementation
+├── 14_dqn_improvements/     <- DQN enhancements
+│   └── double_dqn.py        <- Fixing overestimation bias
+├── 15_dqn_applications/     <- DQN in the wild
+│   ├── cartpole_dqn/        <- CartPole with neural nets
+│   └── lunarlander_dqn/     <- Landing rockets with DQN
+├── 16_actor_critic/         <- Best of both worlds
+│   ├── advantage.py         <- GAE and advantage estimation
+│   ├── entropy.py           <- Exploration via entropy bonus
+│   └── a2c.py               <- Advantage Actor-Critic
+└── 17_actor_critic_applications/  <- A2C in action
+    ├── cartpole_a2c/        <- A2C vs DQN vs REINFORCE
+    └── lunarlander_a2c/     <- Landing rockets, actor-critic style
 ```
 
 ---
@@ -116,6 +137,84 @@ $$\nabla J(\theta) = \mathbb{E}[\nabla \log \pi_\theta(a|s) \cdot G_t]$$
 
 ---
 
+## Week 4: Unified Agents & Benchmarking
+
+*"Time to get organized and systematic"*
+
+### Exploration Strategies
+Implemented modular exploration strategies:
+- **ε-greedy**: Classic random exploration
+- **Boltzmann/Softmax**: Temperature-based action selection
+- **UCB (Upper Confidence Bound)**: Optimism in the face of uncertainty
+
+### Benchmarking Framework
+Systematic comparison of algorithms across environments with statistical rigor.
+
+---
+
+## Week 5: Deep Q-Networks (DQN)
+
+*"When tabular methods hit their limits, neural networks enter the chat"*
+
+### The DQN Revolution
+Pure NumPy implementation of DQN with:
+- **Experience Replay**: Break correlation, reuse data
+- **Target Networks**: Stable learning targets
+- **Double DQN**: Fix overestimation bias
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                   DQN Architecture                          │
+├─────────────────────────────────────────────────────────────┤
+│   State → [Hidden 64] → [Hidden 64] → Q-values             │
+│                                                             │
+│   Key Innovations:                                          │
+│   1. Experience Replay Buffer                               │
+│   2. Target Network (updated every C steps)                 │
+│   3. Double DQN (decouple selection from evaluation)        │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### CartPole & LunarLander with DQN
+Solving classic control problems with neural network function approximation.
+
+---
+
+## Week 6: Actor-Critic Methods (A2C)
+
+*"Why choose between policy gradients and value functions when you can have both?"*
+
+### Advantage Actor-Critic
+Combines the best of both worlds:
+- **Actor**: Policy network π(a|s) - what to do
+- **Critic**: Value network V(s) - how good is this state
+
+```
+                        ┌─────────────────┐
+                        │   Environment   │
+                        └────────┬────────┘
+                                 │
+                        state s, reward r
+                                 │
+         ┌───────────────────────┼───────────────────────┐
+         │                       │                       │
+         ▼                       │                       ▼
+   ┌──────────┐                  │                ┌──────────┐
+   │  ACTOR   │                  │                │  CRITIC  │
+   │  π(a|s)  │◄─── Advantage ───┤                │   V(s)   │
+   └──────────┘    A = Q - V     │                └──────────┘
+         │                       │                       │
+         ▼                       │                       ▼
+      action a               gradient                baseline
+```
+
+### Key Components
+- **GAE (Generalized Advantage Estimation)**: Tunable bias-variance tradeoff
+- **Entropy Regularization**: Prevent premature convergence
+- **Shared Feature Layers**: Parameter efficient actor-critic
+
+---
+
 ## Quick Start
 
 ```bash
@@ -134,18 +233,32 @@ python rl_fundamentals/07_td_applications/cartpole/solve_cartpole.py
 # === Week 3: Monte Carlo & Policy Gradients ===
 python rl_fundamentals/10_mc_pg_applications/blackjack/solve_blackjack.py
 python rl_fundamentals/10_mc_pg_applications/cartpole_reinforce/solve_cartpole_reinforce.py
+
+# === Week 4: Unified Agent & Benchmarking ===
+python rl_fundamentals/11_unified_agent/exploration_strategies.py
+python rl_fundamentals/12_benchmarking/benchmark.py
+
+# === Week 5: Deep Q-Networks ===
+python rl_fundamentals/13_dqn_fundamentals/dqn.py
+python rl_fundamentals/14_dqn_improvements/double_dqn.py
+python rl_fundamentals/15_dqn_applications/cartpole_dqn/solve_cartpole_dqn.py
+
+# === Week 6: Actor-Critic ===
+python rl_fundamentals/16_actor_critic/a2c.py
+python rl_fundamentals/17_actor_critic_applications/cartpole_a2c/solve_cartpole_a2c.py
 ```
 
 ---
 
 ## Speedrun Progress
 
-- [x] **Dynamic Programming** - When you have the cheat codes (full model)
-- [x] **Temporal Difference** - Q-Learning & SARSA (model-free vibes)
-- [x] **Monte Carlo** - Sample full episodes, no bootstrapping
-- [x] **Policy Gradients** - REINFORCE (direct policy optimization)
-- [ ] **Actor-Critic** - Why choose when you can have both
-- [ ] **Deep RL** - Neural networks enter the chat
+- [x] **Week 1: Dynamic Programming** - When you have the cheat codes (full model)
+- [x] **Week 2: Temporal Difference** - Q-Learning & SARSA (model-free vibes)
+- [x] **Week 3: Monte Carlo & Policy Gradients** - Episode-based learning
+- [x] **Week 4: Unified Agents** - Modular exploration & benchmarking
+- [x] **Week 5: Deep Q-Networks** - Neural nets + experience replay + target networks
+- [x] **Week 6: Actor-Critic** - Best of policy gradients + value functions
+- [ ] **Week 7+: Advanced Topics** - PPO, SAC, Model-based RL...
 
 ---
 
@@ -172,6 +285,20 @@ python rl_fundamentals/10_mc_pg_applications/cartpole_reinforce/solve_cartpole_r
 | **MC Prediction** | V(s) ← V(s) + α[G_t - V(s)] | Unbiased, high variance |
 | **REINFORCE** | θ ← θ + α·G_t·∇log π(a\|s) | Direct policy optimization |
 
+### Week 5: Deep Q-Networks
+
+| Algorithm | Key Innovation | Benefit |
+|-----------|----------------|---------|
+| **DQN** | Experience Replay + Target Network | Stable deep RL |
+| **Double DQN** | Decouple selection from evaluation | Reduce overestimation |
+
+### Week 6: Actor-Critic
+
+| Algorithm | Components | Benefit |
+|-----------|------------|---------|
+| **A2C** | Actor π(a\|s) + Critic V(s) | Lower variance than REINFORCE |
+| **GAE** | λ-weighted TD errors | Tunable bias-variance |
+
 ---
 
 ## Method Comparison
@@ -182,6 +309,8 @@ python rl_fundamentals/10_mc_pg_applications/cartpole_reinforce/solve_cartpole_r
 | **TD** | Yes | Yes | No | Some | Medium |
 | **MC** | No | Yes | Yes | None | High |
 | **PG** | No | Yes | Yes | None | Very High |
+| **DQN** | Yes | Yes | No | Some | Low |
+| **A2C** | Yes (GAE) | Yes | No | Tunable | Medium |
 
 ---
 
@@ -205,8 +334,8 @@ This repo follows the ancient wisdom:
 
 ---
 
-*Currently speedrunning: Monte Carlo & Policy Gradients* ✓
+*Currently speedrunning: DQN & Actor-Critic* ✓
 
-*Next up: Actor-Critic Methods (best of both worlds)*
+*Next up: PPO, SAC, and beyond!*
 
 **Stars appreciated, issues tolerated, PRs celebrated** ⭐

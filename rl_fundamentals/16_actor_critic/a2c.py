@@ -103,22 +103,22 @@ class ActorCriticNetwork:
         self.t = 0
 
     def _init_weights(self) -> None:
-        """Initialize weights using He initialization."""
-        # Shared layers
+        """Initialize weights using scaled He initialization for stability."""
+        # Shared layers - smaller initialization for stability
         dims = [self.state_dim] + self.hidden_dims
         for i in range(len(dims) - 1):
-            scale = np.sqrt(2.0 / dims[i])
+            scale = np.sqrt(2.0 / dims[i]) * 0.1  # 0.1x He init
             self.params[f'shared_W{i}'] = self.rng.standard_normal((dims[i], dims[i+1])) * scale
             self.params[f'shared_b{i}'] = np.zeros(dims[i+1])
 
-        # Actor head (policy)
+        # Actor head (policy) - small init important for policy
         last_hidden = self.hidden_dims[-1]
-        scale = np.sqrt(2.0 / last_hidden) * 0.01  # Smaller for policy
+        scale = np.sqrt(2.0 / last_hidden) * 0.01
         self.params['actor_W'] = self.rng.standard_normal((last_hidden, self.action_dim)) * scale
         self.params['actor_b'] = np.zeros(self.action_dim)
 
-        # Critic head (value)
-        scale = np.sqrt(2.0 / last_hidden)
+        # Critic head (value) - smaller init
+        scale = np.sqrt(2.0 / last_hidden) * 0.1
         self.params['critic_W'] = self.rng.standard_normal((last_hidden, 1)) * scale
         self.params['critic_b'] = np.zeros(1)
 
@@ -148,6 +148,7 @@ class ActorCriticNetwork:
             W = self.params[f'shared_W{i}']
             b = self.params[f'shared_b{i}']
             z = x @ W + b
+            z = np.clip(z, -50, 50)  # Prevent overflow
             cache[f'shared_z{i}'] = z
             x = np.maximum(0, z)  # ReLU
             cache[f'shared_a{i}'] = x
@@ -156,6 +157,7 @@ class ActorCriticNetwork:
 
         # Actor head (policy)
         actor_z = shared_features @ self.params['actor_W'] + self.params['actor_b']
+        actor_z = np.clip(actor_z, -50, 50)  # Prevent overflow
         cache['actor_z'] = actor_z
 
         # Stable softmax
@@ -166,6 +168,7 @@ class ActorCriticNetwork:
 
         # Critic head (value)
         value = shared_features @ self.params['critic_W'] + self.params['critic_b']
+        value = np.clip(value, -1000, 1000)  # Reasonable value range
         value = value.squeeze(-1)
         cache['value'] = value
 
@@ -264,6 +267,7 @@ class ActorCriticNetwork:
         for i in range(len(self.hidden_dims) - 1, -1, -1):
             # ReLU gradient
             d_shared = d_shared * (cache[f'shared_z{i}'] > 0)
+            d_shared = np.clip(d_shared, -10, 10)  # Clip intermediate gradients
 
             # Gradient w.r.t. weights and biases
             if i == 0:
@@ -274,11 +278,21 @@ class ActorCriticNetwork:
             gradients[f'shared_W{i}'] = prev_activation.T @ d_shared
             gradients[f'shared_b{i}'] = np.sum(d_shared, axis=0)
 
+            # Clip individual gradients
+            gradients[f'shared_W{i}'] = np.clip(gradients[f'shared_W{i}'], -10, 10)
+            gradients[f'shared_b{i}'] = np.clip(gradients[f'shared_b{i}'], -10, 10)
+
             # Gradient for next layer
             if i > 0:
                 d_shared = d_shared @ self.params[f'shared_W{i}'].T
+                d_shared = np.clip(d_shared, -10, 10)
 
-        # Gradient clipping
+        # Handle NaN in gradients
+        for key in gradients:
+            if np.any(~np.isfinite(gradients[key])):
+                gradients[key] = np.nan_to_num(gradients[key], nan=0.0, posinf=1.0, neginf=-1.0)
+
+        # Gradient clipping by global norm
         total_norm = 0
         for g in gradients.values():
             total_norm += np.sum(g ** 2)
@@ -541,16 +555,16 @@ if __name__ == "__main__":
         state_dim=4,
         action_dim=2,
         hidden_dims=[64, 64],
-        n_episodes=500,
+        n_episodes=1000,
         max_steps=500,
-        learning_rate=0.001,
+        learning_rate=0.0003,  # Lower for stability
         gamma=0.99,
         gae_lambda=0.95,
         normalize_advantages=True,
         value_coef=0.5,
         entropy_coef=0.01,
         max_grad_norm=0.5,
-        update_freq=5,
+        update_freq=10,  # Longer rollouts
         seed=42
     )
 

@@ -51,9 +51,14 @@ A personal RL learning repo where I implement algorithms from first principles. 
 │   ├── advantage.py         <- GAE and advantage estimation
 │   ├── entropy.py           <- Exploration via entropy bonus
 │   └── a2c.py               <- Advantage Actor-Critic
-└── 17_actor_critic_applications/  <- A2C in action
-    ├── cartpole_a2c/        <- A2C vs DQN vs REINFORCE
-    └── lunarlander_a2c/     <- Landing rockets, actor-critic style
+├── 17_actor_critic_applications/  <- A2C in action
+│   ├── cartpole_a2c/        <- A2C vs DQN vs REINFORCE
+│   └── lunarlander_a2c/     <- Landing rockets, actor-critic style
+├── 18_ppo/                  <- The algorithm that made RL practical
+│   └── ppo.py               <- PPO with clipping (discrete + continuous)
+└── 19_ppo_applications/     <- PPO in the wild
+    ├── lunarlander_ppo/     <- Stable lunar landing
+    └── bipedal_walker_ppo/  <- Teaching a robot to walk
 ```
 
 ---
@@ -215,6 +220,42 @@ Combines the best of both worlds:
 
 ---
 
+## Week 7: Proximal Policy Optimization (PPO)
+
+*"The algorithm that made deep RL actually practical"*
+
+### The Clipped Surrogate Objective
+
+PPO takes A2C and adds one powerful constraint: **don't let the policy change too much in a single update**.
+
+$$L^{CLIP}(\theta) = \hat{\mathbb{E}}_t\left[\min\left(r_t(\theta) \hat{A}_t, \; \text{clip}(r_t(\theta), 1-\epsilon, 1+\epsilon) \hat{A}_t\right)\right]$$
+
+where $r_t(\theta) = \frac{\pi_\theta(a_t|s_t)}{\pi_{\theta_{old}}(a_t|s_t)}$ is the probability ratio.
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                   PPO: A2C with Guardrails                   │
+├─────────────────────────────────────────────────────────────┤
+│                                                              │
+│   Collect rollout → Compute GAE advantages                   │
+│                          ↓                                   │
+│         ┌─── For K epochs (reuse data!) ───┐                │
+│         │  Shuffle into mini-batches        │                │
+│         │  ratio = π_new / π_old            │                │
+│         │  clip(ratio, 1-ε, 1+ε)           │                │
+│         │  Take pessimistic (min) update    │                │
+│         └───────────────────────────────────┘                │
+│                                                              │
+│   Key insight: clipping prevents catastrophic policy updates │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### LunarLander & BipedalWalker with PPO
+- **LunarLander**: Discrete actions (4), PPO's stability shines on this harder control task
+- **BipedalWalker**: Continuous actions (4D Gaussian policy), teaching a robot to walk
+
+---
+
 ## Quick Start
 
 ```bash
@@ -246,6 +287,11 @@ python rl_fundamentals/15_dqn_applications/cartpole_dqn/solve_cartpole_dqn.py
 # === Week 6: Actor-Critic ===
 python rl_fundamentals/16_actor_critic/a2c.py
 python rl_fundamentals/17_actor_critic_applications/cartpole_a2c/solve_cartpole_a2c.py
+
+# === Week 7: PPO ===
+python rl_fundamentals/18_ppo/ppo.py
+python rl_fundamentals/19_ppo_applications/lunarlander_ppo/solve_lunarlander_ppo.py
+python rl_fundamentals/19_ppo_applications/bipedal_walker_ppo/solve_bipedal_walker_ppo.py
 ```
 
 ---
@@ -258,7 +304,8 @@ python rl_fundamentals/17_actor_critic_applications/cartpole_a2c/solve_cartpole_
 - [x] **Week 4: Unified Agents** - Modular exploration & benchmarking
 - [x] **Week 5: Deep Q-Networks** - Neural nets + experience replay + target networks
 - [x] **Week 6: Actor-Critic** - Best of policy gradients + value functions
-- [ ] **Week 7+: Advanced Topics** - PPO, SAC, Model-based RL...
+- [x] **Week 7: PPO** - Clipped surrogate, stable updates, discrete + continuous
+- [ ] **Week 8+: Advanced Topics** - SAC, Model-based RL...
 
 ---
 
@@ -299,6 +346,12 @@ python rl_fundamentals/17_actor_critic_applications/cartpole_a2c/solve_cartpole_
 | **A2C** | Actor π(a\|s) + Critic V(s) | Lower variance than REINFORCE |
 | **GAE** | λ-weighted TD errors | Tunable bias-variance |
 
+### Week 7: Proximal Policy Optimization
+
+| Algorithm | Key Innovation | Benefit |
+|-----------|----------------|---------|
+| **PPO** | Clipped surrogate ratio | Stable policy updates, multi-epoch reuse |
+
 ---
 
 ## Method Comparison
@@ -311,6 +364,7 @@ python rl_fundamentals/17_actor_critic_applications/cartpole_a2c/solve_cartpole_
 | **PG** | No | Yes | Yes | None | Very High |
 | **DQN** | Yes | Yes | No | Some | Low |
 | **A2C** | Yes (GAE) | Yes | No | Tunable | Medium |
+| **PPO** | Yes (GAE) | Yes | No | Tunable | Low |
 
 ---
 
@@ -334,8 +388,8 @@ This repo follows the ancient wisdom:
 
 ---
 
-*Currently speedrunning: DQN & Actor-Critic* ✓
+*Currently speedrunning: PPO* ✓
 
-*Next up: PPO, SAC, and beyond!*
+*Next up: SAC, Model-based RL, and beyond!*
 
 **Stars appreciated, issues tolerated, PRs celebrated** ⭐

@@ -5,6 +5,7 @@ Pure NumPy implementation of DQN with:
 - Experience replay for breaking sample correlation
 - Target network for stable learning targets
 - Epsilon-greedy exploration with decay
+- Huber loss for robust TD error handling
 
 This implements the algorithm from:
 Mnih et al., 2015 - "Human-level control through deep reinforcement learning"
@@ -71,59 +72,37 @@ class DQNetwork:
                  hidden_dims: List[int] = [64, 64],
                  learning_rate: float = 0.001,
                  seed: int = 42):
-        """
-        Initialize DQN.
-
-        Args:
-            state_dim: Input dimension
-            action_dim: Output dimension (number of actions)
-            hidden_dims: Hidden layer sizes
-            learning_rate: Learning rate for gradient descent
-            seed: Random seed
-        """
         self.rng = np.random.default_rng(seed)
         self.state_dim = state_dim
         self.action_dim = action_dim
         self.hidden_dims = hidden_dims
         self.learning_rate = learning_rate
 
-        # Initialize weights
         self.params = {}
         self._init_weights()
 
-        # For Adam optimizer
+        # Adam optimizer state
         self.m = {k: np.zeros_like(v) for k, v in self.params.items()}
         self.v = {k: np.zeros_like(v) for k, v in self.params.items()}
-        self.t = 0  # Time step for bias correction
+        self.t = 0
 
     def _init_weights(self) -> None:
-        """Initialize weights using scaled He initialization for stability."""
+        """Xavier uniform initialization - stable for both ReLU and linear."""
         dims = [self.state_dim] + self.hidden_dims + [self.action_dim]
 
         for i in range(len(dims) - 1):
-            fan_in = dims[i]
-
-            # Smaller initialization for stability (0.1x He init)
-            scale = np.sqrt(2.0 / fan_in) * 0.1
-
-            self.params[f'W{i}'] = self.rng.standard_normal((dims[i], dims[i+1])) * scale
-            self.params[f'b{i}'] = np.zeros(dims[i+1])
+            fan_in, fan_out = dims[i], dims[i + 1]
+            limit = np.sqrt(6.0 / (fan_in + fan_out))
+            self.params[f'W{i}'] = self.rng.uniform(-limit, limit, (fan_in, fan_out)).astype(np.float64)
+            self.params[f'b{i}'] = np.zeros(fan_out, dtype=np.float64)
 
     def forward(self, state: np.ndarray, return_cache: bool = False):
-        """
-        Forward pass through the network.
-
-        Args:
-            state: Input state(s)
-            return_cache: If True, return intermediate activations for backprop
-
-        Returns:
-            Q-values, and optionally the cache of activations
-        """
+        """Forward pass through the network."""
         single_input = state.ndim == 1
         if single_input:
             state = state.reshape(1, -1)
 
+        state = state.astype(np.float64)
         cache = {'input': state}
         x = state
         n_layers = len(self.hidden_dims) + 1
@@ -133,7 +112,7 @@ class DQNetwork:
             b = self.params[f'b{i}']
 
             z = x @ W + b
-            # Clip to prevent overflow
+            z = np.nan_to_num(z, nan=0.0, posinf=50.0, neginf=-50.0)
             z = np.clip(z, -50, 50)
             cache[f'z{i}'] = z
 
@@ -142,10 +121,6 @@ class DQNetwork:
                 cache[f'a{i}'] = x
             else:  # Linear output
                 x = z
-
-        # Handle NaN/Inf
-        if np.any(~np.isfinite(x)):
-            x = np.nan_to_num(x, nan=0.0, posinf=50.0, neginf=-50.0)
 
         if single_input:
             x = x.squeeze(0)
@@ -157,17 +132,10 @@ class DQNetwork:
     def backward(self, states: np.ndarray, actions: np.ndarray,
                  targets: np.ndarray) -> float:
         """
-        Backward pass and parameter update.
+        Backward pass using Huber loss for stability.
 
-        Computes gradients using backpropagation and updates weights.
-
-        Args:
-            states: Batch of states (batch_size, state_dim)
-            actions: Batch of actions taken (batch_size,)
-            targets: TD targets y = r + gamma * max Q'(s', a')
-
-        Returns:
-            Loss value (MSE)
+        Huber loss clips the gradient for large errors (|e|>1) to ±1,
+        while still giving correct gradients for small errors.
         """
         batch_size = states.shape[0]
         n_layers = len(self.hidden_dims) + 1
@@ -178,95 +146,91 @@ class DQNetwork:
         # Get Q-values for taken actions
         q_taken = q_values[np.arange(batch_size), actions]
 
-        # Loss: MSE between Q(s,a) and target
+        # Huber loss (smooth L1) - robust to large TD errors
         td_errors = q_taken - targets
-        loss = np.mean(td_errors ** 2)
+        abs_errors = np.abs(td_errors)
+        huber_mask = abs_errors <= 1.0
+        loss = np.mean(np.where(huber_mask, 0.5 * td_errors**2, abs_errors - 0.5))
+
+        # Huber loss gradient: clip td_error to [-1, 1]
+        grad_td = np.clip(td_errors, -1.0, 1.0) / batch_size
 
         # Gradient of loss w.r.t. Q-values
-        # d(MSE)/d(Q) = 2 * (Q - target) / batch_size
         dq = np.zeros_like(q_values)
-        dq[np.arange(batch_size), actions] = 2 * td_errors / batch_size
-
-        # Clip gradients for stability
-        dq = np.clip(dq, -1, 1)
+        dq[np.arange(batch_size), actions] = grad_td
 
         # Backpropagate through layers
         gradients = {}
         dx = dq
 
         for i in range(n_layers - 1, -1, -1):
-            # Get input to this layer
             if i == 0:
                 a_prev = cache['input']
             else:
                 a_prev = cache[f'a{i-1}']
 
-            # Gradient w.r.t. weights and biases
             gradients[f'W{i}'] = a_prev.T @ dx
             gradients[f'b{i}'] = np.sum(dx, axis=0)
 
-            # Clip gradients
-            gradients[f'W{i}'] = np.clip(gradients[f'W{i}'], -10, 10)
-            gradients[f'b{i}'] = np.clip(gradients[f'b{i}'], -10, 10)
-
-            # Gradient w.r.t. previous layer output
             if i > 0:
                 dx = dx @ self.params[f'W{i}'].T
-                dx = np.clip(dx, -10, 10)
-                # ReLU gradient
-                dx = dx * (cache[f'z{i-1}'] > 0)
+                dx = dx * (cache[f'z{i-1}'] > 0)  # ReLU gradient
 
-        # Handle NaN in gradients
+        # Replace NaN/Inf gradients with zero
         for key in gradients:
-            if np.any(~np.isfinite(gradients[key])):
-                gradients[key] = np.nan_to_num(gradients[key], nan=0.0, posinf=1.0, neginf=-1.0)
+            gradients[key] = np.nan_to_num(gradients[key], nan=0.0, posinf=0.0, neginf=0.0)
 
-        # Update parameters using Adam optimizer
+        # Global gradient norm clipping
+        total_norm = sum(np.sum(g**2) for g in gradients.values())
+        total_norm = np.sqrt(total_norm)
+        max_norm = 10.0
+        if total_norm > max_norm:
+            scale = max_norm / (total_norm + 1e-6)
+            gradients = {k: v * scale for k, v in gradients.items()}
+
         self._adam_update(gradients)
-
         return loss
 
     def _adam_update(self, gradients: Dict[str, np.ndarray],
                      beta1: float = 0.9, beta2: float = 0.999,
-                     epsilon: float = 1e-8) -> None:
-        """
-        Update parameters using Adam optimizer.
-
-        Adam maintains exponential moving averages of gradients (m) and
-        squared gradients (v), with bias correction.
-        """
+                     epsilon: float = 1e-8,
+                     weight_decay: float = 1e-4) -> None:
+        """Adam optimizer update with weight decay and NaN safety."""
         self.t += 1
 
         for key in self.params:
             g = gradients[key]
 
-            # Clip gradient
-            g = np.clip(g, -1, 1)
+            # AdamW-style weight decay (applied to weights only, not biases)
+            if 'W' in key:
+                g = g + weight_decay * self.params[key]
 
-            # Update biased first moment estimate
             self.m[key] = beta1 * self.m[key] + (1 - beta1) * g
-
-            # Update biased second raw moment estimate
             self.v[key] = beta2 * self.v[key] + (1 - beta2) * (g ** 2)
 
-            # Compute bias-corrected estimates
             m_hat = self.m[key] / (1 - beta1 ** self.t)
             v_hat = self.v[key] / (1 - beta2 ** self.t)
 
-            # Update parameters
-            self.params[key] -= self.learning_rate * m_hat / (np.sqrt(v_hat) + epsilon)
+            update = self.learning_rate * m_hat / (np.sqrt(v_hat) + epsilon)
+
+            # NaN safety: skip update if it produces NaN
+            new_param = self.params[key] - update
+            if np.all(np.isfinite(new_param)):
+                self.params[key] = new_param
+
+        # Clip weights to prevent unbounded growth
+        for key in self.params:
+            if 'W' in key:
+                np.clip(self.params[key], -10.0, 10.0, out=self.params[key])
 
     def get_params(self) -> Dict[str, np.ndarray]:
-        """Return a copy of network parameters."""
         return {k: v.copy() for k, v in self.params.items()}
 
     def set_params(self, params: Dict[str, np.ndarray]) -> None:
-        """Set network parameters."""
         for k, v in params.items():
             self.params[k] = v.copy()
 
     def copy(self) -> 'DQNetwork':
-        """Create a copy of this network."""
         new_net = DQNetwork(
             self.state_dim, self.action_dim,
             self.hidden_dims, self.learning_rate, seed=0
@@ -276,145 +240,78 @@ class DQNetwork:
 
 
 class DQNAgent:
-    """
-    DQN Agent with experience replay and target network.
-
-    The full DQN algorithm:
-    1. Select action using epsilon-greedy from Q-network
-    2. Execute action, observe reward and next state
-    3. Store transition in replay buffer
-    4. Sample random minibatch from buffer
-    5. Compute TD targets using target network
-    6. Update Q-network via gradient descent
-    7. Periodically update target network
-    """
+    """DQN Agent with experience replay and target network."""
 
     def __init__(self, config: DQNConfig):
-        """
-        Initialize DQN agent.
-
-        Args:
-            config: DQN configuration
-        """
         self.config = config
         self.rng = np.random.default_rng(config.seed)
 
-        # Q-network
         self.q_network = DQNetwork(
             config.state_dim, config.action_dim,
             config.hidden_dims, config.learning_rate, config.seed
         )
-
-        # Target network (copy of Q-network)
         self.target_network = self.q_network.copy()
 
-        # Replay buffer
         self.buffer = ReplayBuffer(
             config.buffer_size, config.state_dim, config.seed
         )
 
-        # Exploration
         self.epsilon = config.epsilon_start
-
-        # Tracking
         self.total_steps = 0
         self.training_losses = []
 
     def select_action(self, state: np.ndarray, training: bool = True) -> int:
-        """
-        Select action using epsilon-greedy policy.
-
-        Args:
-            state: Current state
-            training: If True, use epsilon-greedy; if False, use greedy
-
-        Returns:
-            Selected action
-        """
         if training and self.rng.random() < self.epsilon:
             return self.rng.integers(self.config.action_dim)
         else:
             q_values = self.q_network.forward(state)
             return int(np.argmax(q_values))
 
-    def store_transition(self, state: np.ndarray, action: int,
-                        reward: float, next_state: np.ndarray, done: bool) -> None:
-        """Store transition in replay buffer."""
+    def store_transition(self, state, action, reward, next_state, done):
         self.buffer.push(state, action, reward, next_state, done)
 
     def train_step(self) -> Optional[float]:
-        """
-        Perform one training step.
-
-        Returns:
-            Loss value, or None if buffer not ready
-        """
         if not self.buffer.is_ready(self.config.batch_size):
             return None
 
-        # Sample batch
         states, actions, rewards, next_states, dones = self.buffer.sample(
             self.config.batch_size
         )
 
         # Compute TD targets using target network
-        # y = r + gamma * max_a' Q_target(s', a') * (1 - done)
         next_q_values = self.target_network.forward(next_states)
         max_next_q = np.max(next_q_values, axis=1)
-        targets = rewards + self.config.gamma * max_next_q * (1 - dones.astype(np.float32))
+        targets = rewards + self.config.gamma * max_next_q * (1 - dones.astype(np.float64))
 
-        # Update Q-network
         loss = self.q_network.backward(states, actions, targets)
         self.training_losses.append(loss)
 
-        # Update target network
         self.total_steps += 1
         if self.config.use_soft_update:
-            # Soft update
             self._soft_update_target()
         else:
-            # Hard update every N steps
             if self.total_steps % self.config.target_update_freq == 0:
                 self._hard_update_target()
 
         return loss
 
-    def _hard_update_target(self) -> None:
-        """Copy Q-network weights to target network."""
+    def _hard_update_target(self):
         self.target_network.set_params(self.q_network.get_params())
 
-    def _soft_update_target(self) -> None:
-        """Soft update: target = tau * online + (1-tau) * target."""
+    def _soft_update_target(self):
         tau = self.config.tau
         online_params = self.q_network.get_params()
         target_params = self.target_network.get_params()
-
         for key in online_params:
             target_params[key] = tau * online_params[key] + (1 - tau) * target_params[key]
-
         self.target_network.set_params(target_params)
 
-    def decay_epsilon(self) -> None:
-        """Decay exploration rate."""
-        self.epsilon = max(
-            self.config.epsilon_end,
-            self.epsilon * self.config.epsilon_decay
-        )
+    def decay_epsilon(self):
+        self.epsilon = max(self.config.epsilon_end, self.epsilon * self.config.epsilon_decay)
 
 
 def train_dqn(env, config: DQNConfig) -> Tuple[DQNAgent, List[float], List[int]]:
-    """
-    Train DQN agent on environment.
-
-    Args:
-        env: Gymnasium environment
-        config: DQN configuration
-
-    Returns:
-        agent: Trained DQN agent
-        episode_returns: Return of each episode
-        episode_lengths: Length of each episode
-    """
+    """Train DQN agent on environment."""
     agent = DQNAgent(config)
     episode_returns = []
     episode_lengths = []
@@ -425,17 +322,11 @@ def train_dqn(env, config: DQNConfig) -> Tuple[DQNAgent, List[float], List[int]]
         episode_length = 0
 
         for step in range(config.max_steps):
-            # Select action
             action = agent.select_action(state, training=True)
-
-            # Execute action
             next_state, reward, terminated, truncated, _ = env.step(action)
             done = terminated or truncated
 
-            # Store transition
             agent.store_transition(state, action, reward, next_state, done)
-
-            # Train
             agent.train_step()
 
             episode_return += reward
@@ -445,13 +336,10 @@ def train_dqn(env, config: DQNConfig) -> Tuple[DQNAgent, List[float], List[int]]
             if done:
                 break
 
-        # Decay epsilon after each episode
         agent.decay_epsilon()
-
         episode_returns.append(episode_return)
         episode_lengths.append(episode_length)
 
-        # Progress reporting
         if (episode + 1) % 50 == 0:
             avg_return = np.mean(episode_returns[-50:])
             avg_length = np.mean(episode_lengths[-50:])
@@ -466,136 +354,74 @@ def train_dqn(env, config: DQNConfig) -> Tuple[DQNAgent, List[float], List[int]]
 
 def evaluate_agent(env, agent: DQNAgent, n_episodes: int = 100,
                    seed: int = 0) -> Tuple[float, float]:
-    """
-    Evaluate trained agent.
-
-    Args:
-        env: Gymnasium environment
-        agent: Trained DQN agent
-        n_episodes: Number of evaluation episodes
-        seed: Random seed
-
-    Returns:
-        mean_return: Average episode return
-        std_return: Standard deviation of returns
-    """
+    """Evaluate trained agent."""
     returns = []
-
     for ep in range(n_episodes):
         state, _ = env.reset(seed=seed + ep)
         episode_return = 0
         done = False
-
         while not done:
             action = agent.select_action(state, training=False)
             state, reward, terminated, truncated, _ = env.step(action)
             episode_return += reward
             done = terminated or truncated
-
         returns.append(episode_return)
-
     return np.mean(returns), np.std(returns)
 
 
 # Demonstration
 if __name__ == "__main__":
+    import matplotlib
+    matplotlib.use('Agg')
     import matplotlib.pyplot as plt
     import os
 
     print("=" * 70)
-    print("DQN Training Demo on CartPole-v1")
+    print("DQN Training Demo on CartPole-v1 (NumPy)")
     print("=" * 70)
 
-    # Create environment
     env = gym.make("CartPole-v1")
 
-    # Configuration - tuned for stability
     config = DQNConfig(
         state_dim=4,
         action_dim=2,
-        hidden_dims=[64, 64],
+        hidden_dims=[128, 128],
         n_episodes=500,
         max_steps=500,
-        batch_size=64,
-        learning_rate=0.0005,  # Lower for stability
+        batch_size=128,
+        learning_rate=0.001,
         gamma=0.99,
         buffer_size=50000,
         min_buffer_size=1000,
-        target_update_freq=200,  # Less frequent updates
+        target_update_freq=200,
         epsilon_start=1.0,
         epsilon_end=0.01,
-        epsilon_decay=0.995,
+        epsilon_decay=0.99,
         seed=42
     )
 
-    print("\nConfiguration:")
-    print(f"  Episodes: {config.n_episodes}")
-    print(f"  Hidden dims: {config.hidden_dims}")
-    print(f"  Batch size: {config.batch_size}")
-    print(f"  Learning rate: {config.learning_rate}")
-    print(f"  Buffer size: {config.buffer_size}")
-    print(f"  Target update freq: {config.target_update_freq}")
+    print(f"\nConfig: lr={config.learning_rate}, hidden={config.hidden_dims}, "
+          f"target_update={config.target_update_freq}")
 
-    print("\nTraining DQN...")
+    print("\nTraining...")
     print("-" * 50)
-
     agent, returns, lengths = train_dqn(env, config)
-
     print("-" * 50)
-    print("\nEvaluating trained agent...")
 
     mean_return, std_return = evaluate_agent(env, agent, n_episodes=100, seed=0)
-    print(f"  Mean return: {mean_return:.2f} +/- {std_return:.2f}")
+    print(f"\nEval: {mean_return:.2f} +/- {std_return:.2f}")
+    print("SOLVED!" if mean_return >= 195 else f"Not solved (need >= 195)")
 
-    solved = mean_return >= 195
-    if solved:
-        print("\n  SOLVED! (Mean return >= 195)")
-    else:
-        print(f"\n  Not solved (need >= 195, got {mean_return:.1f})")
-
-    # Visualization
-    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
-
-    # Learning curve
+    fig, ax = plt.subplots(figsize=(10, 5))
     window = 20
-    if len(lengths) > window:
-        smoothed = np.convolve(lengths, np.ones(window)/window, mode='valid')
-        axes[0].plot(smoothed, color='blue', linewidth=1.5)
-    else:
-        axes[0].plot(lengths, color='blue', linewidth=1.5)
-
-    axes[0].axhline(y=195, color='green', linestyle='--', label='Solved (195)')
-    axes[0].axhline(y=500, color='red', linestyle=':', alpha=0.5, label='Max (500)')
-    axes[0].set_xlabel('Episode')
-    axes[0].set_ylabel('Episode Length')
-    axes[0].set_title('DQN Learning Curve')
-    axes[0].legend()
-    axes[0].grid(True, alpha=0.3)
-
-    # Training loss
-    if agent.training_losses:
-        window_loss = min(100, len(agent.training_losses) // 10)
-        if window_loss > 1:
-            smoothed_loss = np.convolve(
-                agent.training_losses,
-                np.ones(window_loss)/window_loss,
-                mode='valid'
-            )
-            axes[1].plot(smoothed_loss, color='red', linewidth=1)
-        else:
-            axes[1].plot(agent.training_losses, color='red', linewidth=1)
-
-    axes[1].set_xlabel('Training Step')
-    axes[1].set_ylabel('TD Loss')
-    axes[1].set_title('Training Loss')
-    axes[1].grid(True, alpha=0.3)
-    axes[1].set_yscale('log')
-
+    smoothed = np.convolve(lengths, np.ones(window)/window, mode='valid')
+    ax.plot(smoothed, color='blue', linewidth=1.5)
+    ax.axhline(y=195, color='green', linestyle='--', label='Solved (195)')
+    ax.set_xlabel('Episode'); ax.set_ylabel('Episode Length')
+    ax.set_title('DQN Learning Curve (NumPy)'); ax.legend(); ax.grid(True, alpha=0.3)
     plt.tight_layout()
 
     save_path = os.path.join(os.path.dirname(__file__), 'dqn_cartpole.png')
     plt.savefig(save_path, dpi=150, bbox_inches='tight')
-    print(f"\nVisualization saved to: {save_path}")
-
-    plt.show()
+    print(f"Plot saved to: {save_path}")
     env.close()

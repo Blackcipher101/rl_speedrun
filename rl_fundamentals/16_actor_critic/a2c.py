@@ -103,24 +103,25 @@ class ActorCriticNetwork:
         self.t = 0
 
     def _init_weights(self) -> None:
-        """Initialize weights using scaled He initialization for stability."""
-        # Shared layers - smaller initialization for stability
+        """Xavier uniform initialization for stable training."""
+        # Shared layers
         dims = [self.state_dim] + self.hidden_dims
         for i in range(len(dims) - 1):
-            scale = np.sqrt(2.0 / dims[i]) * 0.1  # 0.1x He init
-            self.params[f'shared_W{i}'] = self.rng.standard_normal((dims[i], dims[i+1])) * scale
-            self.params[f'shared_b{i}'] = np.zeros(dims[i+1])
+            fan_in, fan_out = dims[i], dims[i + 1]
+            limit = np.sqrt(6.0 / (fan_in + fan_out))
+            self.params[f'shared_W{i}'] = self.rng.uniform(-limit, limit, (fan_in, fan_out)).astype(np.float64)
+            self.params[f'shared_b{i}'] = np.zeros(fan_out, dtype=np.float64)
 
-        # Actor head (policy) - small init important for policy
+        # Actor head (policy) - small init for near-uniform initial policy
         last_hidden = self.hidden_dims[-1]
-        scale = np.sqrt(2.0 / last_hidden) * 0.01
-        self.params['actor_W'] = self.rng.standard_normal((last_hidden, self.action_dim)) * scale
-        self.params['actor_b'] = np.zeros(self.action_dim)
+        limit = np.sqrt(6.0 / (last_hidden + self.action_dim)) * 0.1
+        self.params['actor_W'] = self.rng.uniform(-limit, limit, (last_hidden, self.action_dim)).astype(np.float64)
+        self.params['actor_b'] = np.zeros(self.action_dim, dtype=np.float64)
 
-        # Critic head (value) - smaller init
-        scale = np.sqrt(2.0 / last_hidden) * 0.1
-        self.params['critic_W'] = self.rng.standard_normal((last_hidden, 1)) * scale
-        self.params['critic_b'] = np.zeros(1)
+        # Critic head (value)
+        limit = np.sqrt(6.0 / (last_hidden + 1))
+        self.params['critic_W'] = self.rng.uniform(-limit, limit, (last_hidden, 1)).astype(np.float64)
+        self.params['critic_b'] = np.zeros(1, dtype=np.float64)
 
     def forward(self, state: np.ndarray, return_cache: bool = False):
         """
@@ -148,7 +149,8 @@ class ActorCriticNetwork:
             W = self.params[f'shared_W{i}']
             b = self.params[f'shared_b{i}']
             z = x @ W + b
-            z = np.clip(z, -50, 50)  # Prevent overflow
+            z = np.nan_to_num(z, nan=0.0, posinf=50.0, neginf=-50.0)
+            z = np.clip(z, -50, 50)
             cache[f'shared_z{i}'] = z
             x = np.maximum(0, z)  # ReLU
             cache[f'shared_a{i}'] = x
@@ -157,7 +159,8 @@ class ActorCriticNetwork:
 
         # Actor head (policy)
         actor_z = shared_features @ self.params['actor_W'] + self.params['actor_b']
-        actor_z = np.clip(actor_z, -50, 50)  # Prevent overflow
+        actor_z = np.nan_to_num(actor_z, nan=0.0, posinf=50.0, neginf=-50.0)
+        actor_z = np.clip(actor_z, -50, 50)
         cache['actor_z'] = actor_z
 
         # Stable softmax
@@ -168,7 +171,8 @@ class ActorCriticNetwork:
 
         # Critic head (value)
         value = shared_features @ self.params['critic_W'] + self.params['critic_b']
-        value = np.clip(value, -1000, 1000)  # Reasonable value range
+        value = np.nan_to_num(value, nan=0.0, posinf=1000.0, neginf=-1000.0)
+        value = np.clip(value, -1000, 1000)
         value = value.squeeze(-1)
         cache['value'] = value
 
@@ -245,9 +249,6 @@ class ActorCriticNetwork:
         d_entropy = -action_probs * (1 + np.log(np.clip(action_probs, 1e-10, 1.0)))
         d_logits -= entropy_coef * d_entropy / batch_size
 
-        # Clip policy gradients
-        d_logits = np.clip(d_logits, -1, 1)
-
         # Gradient through actor head
         shared_features = cache[f'shared_a{len(self.hidden_dims)-1}']
         gradients['actor_W'] = shared_features.T @ d_logits
@@ -267,7 +268,6 @@ class ActorCriticNetwork:
         for i in range(len(self.hidden_dims) - 1, -1, -1):
             # ReLU gradient
             d_shared = d_shared * (cache[f'shared_z{i}'] > 0)
-            d_shared = np.clip(d_shared, -10, 10)  # Clip intermediate gradients
 
             # Gradient w.r.t. weights and biases
             if i == 0:
@@ -278,19 +278,13 @@ class ActorCriticNetwork:
             gradients[f'shared_W{i}'] = prev_activation.T @ d_shared
             gradients[f'shared_b{i}'] = np.sum(d_shared, axis=0)
 
-            # Clip individual gradients
-            gradients[f'shared_W{i}'] = np.clip(gradients[f'shared_W{i}'], -10, 10)
-            gradients[f'shared_b{i}'] = np.clip(gradients[f'shared_b{i}'], -10, 10)
-
             # Gradient for next layer
             if i > 0:
                 d_shared = d_shared @ self.params[f'shared_W{i}'].T
-                d_shared = np.clip(d_shared, -10, 10)
 
-        # Handle NaN in gradients
+        # Replace NaN/Inf gradients with zero
         for key in gradients:
-            if np.any(~np.isfinite(gradients[key])):
-                gradients[key] = np.nan_to_num(gradients[key], nan=0.0, posinf=1.0, neginf=-1.0)
+            gradients[key] = np.nan_to_num(gradients[key], nan=0.0, posinf=0.0, neginf=0.0)
 
         # Gradient clipping by global norm
         total_norm = 0
@@ -315,8 +309,9 @@ class ActorCriticNetwork:
 
     def _adam_update(self, gradients: Dict[str, np.ndarray],
                      beta1: float = 0.9, beta2: float = 0.999,
-                     epsilon: float = 1e-8) -> None:
-        """Update parameters using Adam optimizer."""
+                     epsilon: float = 1e-8,
+                     weight_decay: float = 1e-4) -> None:
+        """Update parameters using Adam optimizer with weight decay and NaN safety."""
         self.t += 1
 
         for key in self.params:
@@ -325,13 +320,27 @@ class ActorCriticNetwork:
 
             g = gradients[key]
 
+            # AdamW-style weight decay (weights only, not biases)
+            if 'W' in key:
+                g = g + weight_decay * self.params[key]
+
             self.m[key] = beta1 * self.m[key] + (1 - beta1) * g
             self.v[key] = beta2 * self.v[key] + (1 - beta2) * (g ** 2)
 
             m_hat = self.m[key] / (1 - beta1 ** self.t)
             v_hat = self.v[key] / (1 - beta2 ** self.t)
 
-            self.params[key] -= self.learning_rate * m_hat / (np.sqrt(v_hat) + epsilon)
+            update = self.learning_rate * m_hat / (np.sqrt(v_hat) + epsilon)
+
+            # NaN safety: skip update if it produces NaN
+            new_param = self.params[key] - update
+            if np.all(np.isfinite(new_param)):
+                self.params[key] = new_param
+
+        # Clip weights to prevent unbounded growth
+        for key in self.params:
+            if 'W' in key:
+                np.clip(self.params[key], -10.0, 10.0, out=self.params[key])
 
 
 class A2CAgent:
@@ -554,17 +563,17 @@ if __name__ == "__main__":
     config = A2CConfig(
         state_dim=4,
         action_dim=2,
-        hidden_dims=[64, 64],
+        hidden_dims=[128, 128],
         n_episodes=1000,
         max_steps=500,
-        learning_rate=0.0003,  # Lower for stability
+        learning_rate=0.001,
         gamma=0.99,
         gae_lambda=0.95,
         normalize_advantages=True,
         value_coef=0.5,
-        entropy_coef=0.01,
-        max_grad_norm=0.5,
-        update_freq=10,  # Longer rollouts
+        entropy_coef=0.05,
+        max_grad_norm=1.0,
+        update_freq=20,
         seed=42
     )
 

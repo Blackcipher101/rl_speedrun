@@ -56,9 +56,31 @@ A personal RL learning repo where I implement algorithms from first principles. 
 │   └── lunarlander_a2c/     <- Landing rockets, actor-critic style
 ├── 18_ppo/                  <- The algorithm that made RL practical
 │   └── ppo.py               <- PPO with clipping (discrete + continuous)
-└── 19_ppo_applications/     <- PPO in the wild
-    ├── lunarlander_ppo/     <- Stable lunar landing
-    └── bipedal_walker_ppo/  <- Teaching a robot to walk
+├── 19_ppo_applications/     <- PPO in the wild
+│   ├── lunarlander_ppo/     <- Stable lunar landing
+│   └── bipedal_walker_ppo/  <- Teaching a robot to walk
+├── 20_trpo/                 <- PPO's predecessor (second-order optimization)
+│   └── trpo.py              <- TRPO: conjugate gradient + line search
+├── 21_ddpg/                 <- Off-policy continuous control
+│   └── ddpg.py              <- DDPG: deterministic policy + replay buffer
+├── 22_td3/                  <- Fixing DDPG's failure modes
+│   └── td3.py               <- TD3: twin critics, delayed updates, smoothing
+├── 23_offpolicy_applications/  <- Off-policy algorithms in the wild
+│   ├── pendulum_ddpg/       <- Swing up with deterministic policy
+│   ├── pendulum_td3/        <- Swing up, twin critic edition
+│   └── bipedal_walker_td3/  <- Teaching a robot to walk (off-policy)
+├── 24_mcts/                 <- Monte Carlo Tree Search from scratch
+│   └── mcts.py              <- UCB1 selection + random rollouts
+├── 25_alphazero/            <- Self-play with neural network MCTS
+│   ├── games.py             <- TicTacToe + Connect Four
+│   └── alphazero.py         <- PolicyValueNet + PUCT + self-play
+├── 26_muzero/               <- Planning without knowing the rules
+│   └── muzero.py            <- Learned dynamics + latent MCTS
+└── 27_game_applications/    <- Game AI in the wild
+    ├── tictactoe_mcts/      <- Pure MCTS achieves perfect play
+    ├── tictactoe_alphazero/  <- AlphaZero learns TicTacToe
+    ├── connect4_alphazero/   <- AlphaZero on Connect Four
+    └── tictactoe_muzero/    <- MuZero: no rules needed
 ```
 
 ---
@@ -256,6 +278,81 @@ where $r_t(\theta) = \frac{\pi_\theta(a_t|s_t)}{\pi_{\theta_{old}}(a_t|s_t)}$ is
 
 ---
 
+## Week 9: TRPO, DDPG & TD3
+
+*"Trust regions, deterministic policies, and twin critics"*
+
+### TRPO — PPO's Predecessor
+
+Uses a **hard KL divergence constraint** enforced via conjugate gradient + line search:
+
+$$\max_\theta L(\theta) \quad \text{s.t.} \quad D_{KL}(\pi_{old} \| \pi_{new}) \leq \delta$$
+
+The natural gradient update: $\theta_{new} = \theta + \sqrt{2\delta / g^T F^{-1} g} \cdot F^{-1} g$
+
+### DDPG & TD3 — Off-Policy Continuous Control
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│              DDPG → TD3: Continuous Control Pipeline          │
+├─────────────────────────────────────────────────────────────┤
+│                                                              │
+│   DDPG: DQN ideas + Actor-Critic for continuous actions      │
+│     state → [Actor μ(s)] → action → [Critic Q(s,a)] → value │
+│     + Replay buffer + Target networks + Exploration noise    │
+│                                                              │
+│   TD3 fixes DDPG's three problems:                           │
+│     1. Twin critics: min(Q1, Q2) → no overestimation        │
+│     2. Delayed updates: actor every 2 critic steps           │
+│     3. Target smoothing: noise on target actions             │
+│                                                              │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Environments
+- **CartPole**: TRPO with natural gradient (discrete)
+- **Pendulum**: DDPG and TD3 comparison (continuous, 1D action)
+- **BipedalWalker**: TD3 on hard 4D continuous control
+
+---
+
+## Week 10: Game AI — MCTS, AlphaZero & MuZero
+
+*"From random rollouts to learning without rules"*
+
+### The Evolution: MCTS → AlphaZero → MuZero
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                Game AI: Three Generations                     │
+├─────────────────────────────────────────────────────────────┤
+│                                                              │
+│  MCTS (2006):  UCB1 selection + random rollouts              │
+│       ↓        No learning, just search                      │
+│  AlphaZero (2017): MCTS + neural network (policy + value)   │
+│       ↓        Self-play learns from scratch                 │
+│  MuZero (2020): MCTS + learned model (no game rules!)       │
+│                Plans in a learned latent space                │
+│                                                              │
+│  Key insight: each generation replaces handcrafted           │
+│  components with learned ones                                │
+│                                                              │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Results
+
+| Algorithm | Game | Win Rate vs Random |
+|-----------|------|--------------------|
+| **MCTS** (1000 sims) | TicTacToe | ~99% |
+| **AlphaZero** (80 iters) | TicTacToe | ~97% |
+| **AlphaZero** (100 iters) | Connect Four | ~98% |
+| **MuZero** (80 iters) | TicTacToe | ~72% |
+
+MuZero achieves lower win rates than AlphaZero because it must also learn the game dynamics from scratch.
+
+---
+
 ## Quick Start
 
 ```bash
@@ -292,6 +389,23 @@ python rl_fundamentals/17_actor_critic_applications/cartpole_a2c/solve_cartpole_
 python rl_fundamentals/18_ppo/ppo.py
 python rl_fundamentals/19_ppo_applications/lunarlander_ppo/solve_lunarlander_ppo.py
 python rl_fundamentals/19_ppo_applications/bipedal_walker_ppo/solve_bipedal_walker_ppo.py
+
+# === Week 9: TRPO, DDPG & TD3 ===
+python rl_fundamentals/20_trpo/trpo.py
+python rl_fundamentals/21_ddpg/ddpg.py
+python rl_fundamentals/22_td3/td3.py
+python rl_fundamentals/23_offpolicy_applications/pendulum_ddpg/solve_pendulum_ddpg.py
+python rl_fundamentals/23_offpolicy_applications/pendulum_td3/solve_pendulum_td3.py
+python rl_fundamentals/23_offpolicy_applications/bipedal_walker_td3/solve_bipedal_walker_td3.py
+
+# === Week 10: Game AI ===
+python rl_fundamentals/24_mcts/mcts.py
+python rl_fundamentals/25_alphazero/alphazero.py
+python rl_fundamentals/26_muzero/muzero.py
+python rl_fundamentals/27_game_applications/tictactoe_mcts/solve_tictactoe_mcts.py
+python rl_fundamentals/27_game_applications/tictactoe_alphazero/solve_tictactoe_alphazero.py
+python rl_fundamentals/27_game_applications/connect4_alphazero/solve_connect4_alphazero.py
+python rl_fundamentals/27_game_applications/tictactoe_muzero/solve_tictactoe_muzero.py
 ```
 
 ---
@@ -305,7 +419,9 @@ python rl_fundamentals/19_ppo_applications/bipedal_walker_ppo/solve_bipedal_walk
 - [x] **Week 5: Deep Q-Networks** - Neural nets + experience replay + target networks
 - [x] **Week 6: Actor-Critic** - Best of policy gradients + value functions
 - [x] **Week 7: PPO** - Clipped surrogate, stable updates, discrete + continuous
-- [ ] **Week 8+: Advanced Topics** - SAC, Model-based RL...
+- [x] **Week 9: TRPO, DDPG & TD3** - Trust regions, off-policy continuous control
+- [x] **Week 10: Game AI** - MCTS, AlphaZero self-play, MuZero learned model
+- [ ] **Week 11+: Research Immersion** - Paper reading, SAC, and beyond...
 
 ---
 
@@ -352,6 +468,22 @@ python rl_fundamentals/19_ppo_applications/bipedal_walker_ppo/solve_bipedal_walk
 |-----------|----------------|---------|
 | **PPO** | Clipped surrogate ratio | Stable policy updates, multi-epoch reuse |
 
+### Week 9: TRPO, DDPG & TD3
+
+| Algorithm | Key Innovation | Benefit |
+|-----------|----------------|---------|
+| **TRPO** | KL-constrained natural gradient | Monotonic improvement guarantee |
+| **DDPG** | Deterministic policy + replay | Off-policy continuous control |
+| **TD3** | Twin critics + delayed + smoothing | Robust continuous control |
+
+### Week 10: Game AI
+
+| Algorithm | Key Innovation | Benefit |
+|-----------|----------------|---------|
+| **MCTS** | UCB1 tree search + random rollouts | Strong play without learning |
+| **AlphaZero** | MCTS + policy-value network + self-play | Learns from scratch, superhuman |
+| **MuZero** | Learned dynamics model + latent MCTS | No game rules needed |
+
 ---
 
 ## Method Comparison
@@ -365,6 +497,12 @@ python rl_fundamentals/19_ppo_applications/bipedal_walker_ppo/solve_bipedal_walk
 | **DQN** | Yes | Yes | No | Some | Low |
 | **A2C** | Yes (GAE) | Yes | No | Tunable | Medium |
 | **PPO** | Yes (GAE) | Yes | No | Tunable | Low |
+| **TRPO** | Yes (GAE) | Yes | No | Tunable | Low |
+| **DDPG** | Yes | Yes | No | Some | Low |
+| **TD3** | Yes | Yes | No | Low | Low |
+| **MCTS** | No | Yes | No | None | High |
+| **AlphaZero** | No | Yes | No | Some | Low |
+| **MuZero** | Yes | Yes | No | Some | Medium |
 
 ---
 
@@ -388,8 +526,8 @@ This repo follows the ancient wisdom:
 
 ---
 
-*Currently speedrunning: PPO* ✓
+*Currently speedrunning: MCTS, AlphaZero & MuZero* ✓
 
-*Next up: SAC, Model-based RL, and beyond!*
+*Next up: Research immersion — paper reading & implementation!*
 
 **Stars appreciated, issues tolerated, PRs celebrated** ⭐
